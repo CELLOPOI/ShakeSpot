@@ -1,0 +1,45 @@
+#pragma code_page(65001)
+#include <windows.h>
+#include "resource.h"
+
+IDD_SETTINGS DIALOGEX 0, 0, 290, 234
+STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "ShakeSpot 原生版设置"
+FONT 9, "Microsoft YaHei UI"
+BEGIN
+  LTEXT "晃一晃，直接放大系统鼠标指针", -1, 16, 14, 255, 14
+  LTEXT "灵敏度", -1, 16, 43, 125, 12
+  COMBOBOX IDC_SENSITIVITY, 166, 40, 105, 90, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+  LTEXT "最大放大倍数", -1, 16, 73, 125, 12
+  COMBOBOX IDC_SCALE, 166, 70, 105, 110, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+  LTEXT "效果持续时间", -1, 16, 103, 125, 12
+  COMBOBOX IDC_DURATION, 166, 100, 105, 110, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+  AUTOCHECKBOX "登录 Windows 时启动", IDC_STARTUP, 16, 131, 240, 14, WS_TABSTOP
+  LTEXT "按住鼠标键时暂停放大；松开后可再次晃动。\n指针最大 256 像素，高缩放时可能达不到所选倍率。", -1, 16, 155, 256, 25
+  LTEXT "", IDC_STATUS, 16, 185, 256, 14
+  PUSHBUTTON "恢复默认", IDC_DEFAULTS, 16, 207, 65, 18
+  PUSHBUTTON "取消", IDCANCEL, 139, 207, 61, 18
+  DEFPUSHBUTTON "保存", IDOK, 209, 207, 62, 18
+END
+
+1 VERSIONINFO
+FILEVERSION 0,2,0,0
+PRODUCTVERSION 0,2,0,0
+FILEFLAGSMASK 0x3fL
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "FileDescription", "ShakeSpot native system cursor locator\0"
+      VALUE "ProductName", "ShakeSpot Native\0"
+      VALUE "ProductVersion", "0.2.0\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

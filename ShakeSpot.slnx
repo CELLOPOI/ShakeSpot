@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/ShakeSpot.Core/ShakeSpot.Core.csproj" />
+  <Project Path="src/ShakeSpot/ShakeSpot.csproj" />
+  <Project Path="tests/ShakeSpot.Tests/ShakeSpot.Tests.csproj" />
+  <Project Path="tests/ShakeSpot.DesktopChecks/ShakeSpot.DesktopChecks.csproj" />
+</Solution>
