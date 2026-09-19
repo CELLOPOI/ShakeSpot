@@ -1,6 +1,6 @@
 # Rust 实现说明
 
-当前产品版本为 0.4.1。主程序、恢复进程、输入识别、动画、位图生成、托盘、设置与开机启动均由 Rust 实现，入口为 `rust/main.rs`。Windows API 使用微软的 `windows-sys 0.61.2`，传递依赖为 `windows-link 0.2.1`，由 `Cargo.lock` 固定。产品构建不会编译或链接历史 C++ 应用。原生设置资源由 Windows SDK 的 `rc.exe` 编译；黑盒桌面测试驱动保留 C++，这样可以独立检查 Rust 程序的实际行为。
+当前产品版本为 0.4.2。主程序、恢复进程、输入识别、动画、位图生成、托盘、设置与开机启动均由 Rust 实现，入口为 `rust/main.rs`。Windows API 使用微软的 `windows-sys 0.61.2`，传递依赖为 `windows-link 0.2.1`，由 `Cargo.lock` 固定。产品构建不会编译或链接历史 C++ 应用。原生设置资源由 Windows SDK 的 `rc.exe` 编译；黑盒桌面测试驱动保留 C++，这样可以独立检查 Rust 程序的实际行为。
 
 本机使用 Rust 1.93.1、Cargo 1.93.1、x86_64-pc-windows-msvc，复用 Visual Studio 2022 Build Tools 与 Windows SDK。Release 使用优化等级 3、ThinLTO、一个 codegen unit、静态 CRT，以及 `panic=abort`。工具链配置跟随 stable；复现实测时应核对报告中的编译器版本。未安装 Rust 的机器可参考 [官方安装说明](https://rust-lang.org/tools/install/)。优先使用已有的 rustup 安装。可选的 `scripts/bootstrap-rust.ps1` 遵循已有 `CARGO_HOME` / `RUSTUP_HOME`，未配置时使用当前用户的 `.cargo` / `.rustup`；也可通过参数指定目录。该脚本会安装工具链并更新当前用户的工具环境变量，构建本身不需要反复运行它。
 
@@ -18,7 +18,9 @@
 
 完整判定计算二维路程、包围盒对角线与净位移：路程/对角线至少 2.4，净位移/路程不超过 0.42。随后通过轨迹的主要方向投影计算有效反向，保留至少 3 次反向、幅度、累计路程、速度、最小时间跨度和冷却限制。这样减少固定 X/Y 轴造成的斜向差异，也过滤另一方向持续大幅漂移的伪甩动。思路参考 [PowerToys Find My Mouse](https://github.com/microsoft/PowerToys/blob/cb25632f5b61eb2e57a3b0b52053409403ae9e98/src/modules/MouseUtils/FindMyMouse/FindMyMouse.cpp)，本实现沿用 ShakeSpot 的往返语义和约束。
 
-增长和缩小阶段使用约 15 毫秒窗口计时器，停留阶段最长 100 毫秒检查一次可见性、角色和心跳。已经达到最大尺寸时，继续晃动只延长停留。移动期间立即检查角色、DPI 和边缘朝向是否发生变化，只有需要改变位图才更新；显示器边界按屏缓存，在切屏或系统通知后刷新。没有调用 `timeBeginPeriod`，计时器频率受系统调度影响。
+增长和缩小阶段使用约 15 毫秒窗口计时器，停留阶段最长 100 毫秒检查一次可见性、角色和心跳。已经达到最大尺寸时，继续晃动只延长停留。0.4.2 在尺寸或边缘朝向变化时，把同一缓存帧同步到 13 种受支持的标准光标角色。悬浮控件随后切换箭头、手形或文本光标时，直接显示已经放大的帧，不依赖应用处理 Raw Input 的顺序，也不等待下一次停留检查。纯角色切换不再替换位图；移动期间仍检查自定义光标、DPI 和边缘朝向。显示器边界按屏缓存，在切屏或系统通知后刷新。没有调用 `timeBeginPeriod`，计时器频率受系统调度影响。
+
+每次几何变化最多调用 13 次系统光标替换，增加动画期间的系统调用与光标副本成本；栅格化仍只生成一帧，缓存上限不变。没有新增事件钩子、线程或高频计时器。实测对照见 [0.4.2 悬浮切换验证](validation/HOVER-FIX-0.4.2.md)。
 
 缓存保留独立光标帧，传给 `SetSystemCursor` 的始终是副本。该 API 会消耗输入句柄，缓存对象继续拥有原件；共享系统光标句柄只借用，不释放。语义依据 [微软 SetSystemCursor 文档](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setsystemcursor)。
 

@@ -11,6 +11,8 @@ HWND target = nullptr;
 int clicks = 0, wheels = 0, dragMoves = 0;
 bool hidden = false, custom = false;
 HCURSOR customCursor = nullptr;
+LPCWSTR standardCursor = IDC_ARROW;
+bool hoverZones = false;
 std::ofstream report;
 int passed = 0;
 void check(bool value, const char* name) {
@@ -32,7 +34,15 @@ LRESULT CALLBACK targetProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     case WM_LBUTTONUP: ReleaseCapture(); return 0;
     case WM_MOUSEMOVE: if(w & MK_LBUTTON) ++dragMoves; return 0;
     case WM_MOUSEWHEEL: ++wheels; return 0;
-    case WM_SETCURSOR: SetCursor(hidden ? nullptr : custom ? customCursor : LoadCursorW(nullptr, IDC_ARROW)); return TRUE;
+    case WM_SETCURSOR: {
+        LPCWSTR role=standardCursor;
+        if(hoverZones) {
+            POINT point{};GetCursorPos(&point);ScreenToClient(window,&point);
+            const LPCWSTR zones[]={IDC_ARROW,IDC_HAND,IDC_IBEAM};
+            role=zones[std::abs(point.x/60)%3];
+        }
+        SetCursor(hidden ? nullptr : custom ? customCursor : LoadCursorW(nullptr,role));return TRUE;
+    }
     case WM_PAINT: {
         PAINTSTRUCT ps{}; HDC dc = BeginPaint(window, &ps); RECT rect{}; GetClientRect(window,&rect);
         FillRect(dc,&rect,static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
@@ -63,6 +73,15 @@ Shape shape(HCURSOR cursor) {
     return result;
 }
 Shape arrowShape() {return shape(LoadCursorW(nullptr,IDC_ARROW));}
+std::array<Shape,CursorIds.size()> systemShapes() {
+    std::array<Shape,CursorIds.size()> result{};
+    for(size_t i=0;i<CursorIds.size();++i)result[i]=shape(LoadCursorW(nullptr,MAKEINTRESOURCEW(CursorIds[i])));
+    return result;
+}
+std::array<DWORD,3> resources(HANDLE process) {
+    DWORD handles=0;if(!GetProcessHandleCount(process,&handles))throw std::runtime_error("Cannot query process handles.");
+    return {GetGuiResources(process,GR_GDIOBJECTS),GetGuiResources(process,GR_USEROBJECTS),handles};
+}
 POINT center() {RECT rect{};GetClientRect(target,&rect);POINT p{rect.right/2,rect.bottom/2};ClientToScreen(target,&p);return p;}
 void moveTo(POINT point) {
     INPUT input{};input.type=INPUT_MOUSE;
@@ -174,7 +193,8 @@ struct Child {
 double cpu(HANDLE process) {FILETIME c{},e{},k{},u{};if(!GetProcessTimes(process,&c,&e,&k,&u))throw std::runtime_error("GetProcessTimes failed.");ULARGE_INTEGER kernel{},user{};kernel.LowPart=k.dwLowDateTime;kernel.HighPart=k.dwHighDateTime;user.LowPart=u.dwLowDateTime;user.HighPart=u.dwHighDateTime;return (kernel.QuadPart+user.QuadPart)/10000000.0;}
 std::pair<double,double> memory(HANDLE process) {PROCESS_MEMORY_COUNTERS_EX counters{};counters.cb=sizeof(counters);if(!GetProcessMemoryInfo(process,reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),sizeof(counters)))throw std::runtime_error("GetProcessMemoryInfo failed.");return {counters.WorkingSetSize/1048576.0,counters.PrivateUsage/1048576.0};}
 void measure(Child& child,const char* name,int mode) {
-    double begin=clockMs(),start=cpu(child.process.hProcess)+cpu(child.guard.get()),nextPreview=0,maxWorking=0,maxPrivate=0;
+    double begin=clockMs(),startMain=cpu(child.process.hProcess),startGuard=cpu(child.guard.get()),nextPreview=0,maxWorking=0,maxPrivate=0;
+    double mainWorking=0,mainPrivate=0,guardWorking=0,guardPrivate=0;
     auto startEvents=query(child.window,9),startSamples=query(child.window,5),startUpdates=query(child.window,2),startTicks=query(child.window,8);
     POINT origin=center();
     while(clockMs()-begin<10000) {
@@ -183,12 +203,62 @@ void measure(Child& child,const char* name,int mode) {
         if(mode==2){POINT p=origin;p.x+=static_cast<LONG>(150*std::sin(t/48));moveTo(p);}
         auto main=memory(child.process.hProcess),guard=memory(child.guard.get());
         maxWorking=std::max(maxWorking,main.first+guard.first);maxPrivate=std::max(maxPrivate,main.second+guard.second);
+        mainWorking=std::max(mainWorking,main.first);mainPrivate=std::max(mainPrivate,main.second);
+        guardWorking=std::max(guardWorking,guard.first);guardPrivate=std::max(guardPrivate,guard.second);
         delay(mode==2?10:25);
     }
-    double elapsed=(clockMs()-begin)/1000,total=cpu(child.process.hProcess)+cpu(child.guard.get())-start;
+    double elapsed=(clockMs()-begin)/1000,mainCpu=cpu(child.process.hProcess)-startMain,guardCpu=cpu(child.guard.get())-startGuard,total=mainCpu+guardCpu;
     report<<std::fixed<<std::setprecision(3)<<"PERF "<<name<<" wall_s="<<elapsed<<" cpu_s="<<total<<" one_core_percent="<<100*total/elapsed<<" combined_working_MiB="<<maxWorking<<" combined_private_MiB="<<maxPrivate
+        <<" main_cpu_s="<<mainCpu<<" guardian_cpu_s="<<guardCpu<<" main_working_MiB="<<mainWorking<<" main_private_MiB="<<mainPrivate<<" guardian_working_MiB="<<guardWorking<<" guardian_private_MiB="<<guardPrivate
         <<" raw_events="<<query(child.window,9)-startEvents<<" samples="<<query(child.window,5)-startSamples<<" cursor_updates="<<query(child.window,2)-startUpdates<<" animation_ticks="<<query(child.window,8)-startTicks<<'\n';report.flush();
     std::cout<<"MEASURED "<<name<<std::endl;
+}
+void setRole(LPCWSTR role) {
+    standardCursor=role;
+    SendMessageW(target,WM_SETCURSOR,reinterpret_cast<WPARAM>(target),MAKELPARAM(HTCLIENT,WM_MOUSEMOVE));
+}
+void hoverChecks(Child& child,const Shape& baseline) {
+    std::array<Shape,CursorIds.size()> originals{};
+    for(size_t i=0;i<CursorIds.size();++i)originals[i]=shape(LoadCursorW(nullptr,MAKEINTRESOURCEW(CursorIds[i])));
+    child.preview();
+    auto tick=query(child.window,8);
+    check(until([&]{return query(child.window,8)>tick&&query(child.window,15)==100;},400),"Hover test starts immediately after a holding tick");
+    const auto events=query(child.window,9);
+    double begin=clockMs();setRole(IDC_HAND);
+    bool updated=until([&]{CURSORINFO info{};return cursorInfo(info)&&info.hCursor==LoadCursorW(nullptr,IDC_HAND)&&shape(info.hCursor)==shape(LoadCursorW(nullptr,IDC_ARROW));},500);
+    double latency=clockMs()-begin;
+    report<<"HOVER stationary_hand_latency_ms="<<latency<<'\n';report.flush();
+    check(updated&&latency<60,"Stationary hover role changes update before the 100 ms holding timer");
+    check(query(child.window,9)==events,"Stationary hover transition needs no new Raw Input");
+    const auto applied=query(child.window,2);
+    setRole(IDC_ARROW);delay(25);setRole(IDC_HAND);delay(25);
+    check(query(child.window,2)==applied,"Returning to an unchanged holding frame reuses the installed role bitmap");
+    for(size_t i=0;i<CursorIds.size();++i) {
+        if(i%4==0)child.command(Preview);
+        setRole(MAKEINTRESOURCEW(CursorIds[i]));
+        // 切换后验收目标槽位及实际显示的像素和热点；相同外观不要求全局句柄立即变化。
+        bool roleReady=until([&]{
+            CURSORINFO info{};auto expected=shape(LoadCursorW(nullptr,MAKEINTRESOURCEW(CursorIds[i])));
+            return cursorInfo(info)&&expected==arrowShape()&&shape(info.hCursor)==expected&&expected.height>baseline.height;
+        },60);
+        if(!roleReady) { CURSORINFO actual{};cursorInfo(actual);report<<"ROLE_FAIL index="<<i<<" current="<<actual.hCursor<<" expected="<<LoadCursorW(nullptr,MAKEINTRESOURCEW(CursorIds[i]))<<" current_height="<<shape(actual.hCursor).height<<" arrow_height="<<arrowShape().height<<" dirty="<<query(child.window,1)<<" stop="<<query(child.window,11)<<'\n'; }
+        check(roleReady,"Every standard hover role keeps the enlarged effect");
+    }
+    child.command(Pause);setRole(IDC_ARROW);
+    bool restored=true;
+    for(size_t i=0;i<CursorIds.size();++i)restored=restored&&shape(LoadCursorW(nullptr,MAKEINTRESOURCEW(CursorIds[i])))==originals[i];
+    check(restored,"All visited hover roles restore their original pixels and hotspots");
+    child.command(Resume);child.preview();
+    customCursor=makeArrow(40);custom=true;setRole(IDC_ARROW);
+    check(until([&]{return !query(child.window,1);},200),"Entering a custom hover cursor cancels the effect safely");
+    CURSORINFO info{};check(cursorInfo(info)&&info.hCursor==customCursor,"Custom hover cursor remains owned by its application");
+    custom=false;setRole(IDC_ARROW);DestroyCursor(customCursor);customCursor=nullptr;
+    check(arrowShape()==baseline,"Custom hover cancellation restores the system arrow");
+    child.preview();
+    hidden=true;setRole(IDC_ARROW);
+    check(until([&]{return !query(child.window,1);},200),"A hidden hover cursor cancels the active effect");
+    hidden=false;setRole(IDC_ARROW);
+    child.command(Pause);child.command(Resume);delay(3500);
 }
 void snapshotCursor(const std::wstring& file) {
     CURSORINFO cursor{};if(!cursorInfo(cursor))throw std::runtime_error("Cursor query failed.");auto geometry=shape(cursor.hCursor);
@@ -220,8 +290,9 @@ int wmain(int argc,wchar_t** argv) {
     try {
         if(FindWindowW(WindowClass,nullptr))throw std::runtime_error("Close the existing native application before running desktop tests.");
         bool measureOnly=argc>2&&std::wstring(argv[2])==L"--measure-only";
+        bool hoverOnly=argc>2&&std::wstring(argv[2])==L"--hover-only";
         auto root=std::filesystem::path(executablePath()).parent_path();
-        auto directory=root/(measureOnly?L"performance-checks":L"desktop-checks");
+        auto directory=root/(measureOnly?L"performance-checks":hoverOnly?L"hover-checks":L"desktop-checks");
         std::filesystem::create_directories(directory);report.open(directory/L"report.txt");
         std::wstring path=argc>1?argv[1]:(root/L"ShakeSpot.Native.exe").wstring();
         WNDCLASSW type{};type.hInstance=GetModuleHandleW(nullptr);type.lpszClassName=L"ShakeSpot.Native.TestTarget";type.lpfnWndProc=targetProc;type.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&type);
@@ -232,15 +303,24 @@ int wmain(int argc,wchar_t** argv) {
         wchar_t foregroundTitle[256]{},atPointTitle[256]{}; GetWindowTextW(GetForegroundWindow(),foregroundTitle,256); GetWindowTextW(WindowFromPoint(center()),atPointTitle,256);
         if(GetForegroundWindow()!=target || WindowFromPoint(center())!=target) std::wcerr<<L"Foreground: "<<foregroundTitle<<L"; at test center: "<<atPointTitle<<std::endl;
         check(GetForegroundWindow()==target && WindowFromPoint(center())==target,"Owned input target is foreground and unobscured");
-        Shape baseline=arrowShape();report<<"BASELINE height="<<baseline.height<<" width="<<baseline.width<<" dpi="<<GetDpiForWindow(target)<<'\n';
+        auto baselineSystem=systemShapes();
+        Shape baseline=baselineSystem[0];report<<"BASELINE height="<<baseline.height<<" width="<<baseline.width<<" dpi="<<GetDpiForWindow(target)<<'\n';
         cleanup.changed=true;
+        if(hoverOnly) {
+            Child child(path,(directory/L"profile").wstring());
+            hoverChecks(child,baseline);
+            report<<"TOTAL "<<passed<<" checks passed\n";
+            return 0;
+        }
         if(measureOnly) {
             Child child(path,(directory/L"profile").wstring());
             delay(1000);
+            measure(child,"idle_before_settings",0);
             measure(child,"effect_held_static",1);delay(1500);
-            measure(child,"continuous_shake",2);
-            child.command(Pause);
-            check(!query(child.window,1)&&arrowShape()==baseline,"Performance run restores cursor");
+            measure(child,"continuous_shake",2);delay(1500);
+            hoverZones=true;measure(child,"continuous_hover_shake",2);hoverZones=false;setRole(IDC_ARROW);delay(1500);
+            child.command(Pause);measure(child,"paused",0);
+            check(!query(child.window,1)&&systemShapes()==baselineSystem,"Performance run restores cursor");
             return 0;
         }
         {
@@ -249,6 +329,7 @@ int wmain(int argc,wchar_t** argv) {
             delay(150);LRESULT sampleStart=query(child.window,5);delay(500);
             check(query(child.window,5)==sampleStart,"Idle detection has no position polling");
             measure(child,"idle_before_settings",0);
+            hoverChecks(child,baseline);
             child.preview();
             CURSORINFO current{};
             check(cursorInfo(current),"Current visible cursor can be queried");
@@ -271,9 +352,9 @@ int wmain(int argc,wchar_t** argv) {
             delay(220);auto triggers=query(child.window,3);wave();
             check(query(child.window,9)>0&&query(child.window,5)>sampleStart,"Raw Input receives motion and samples movement");
             check(query(child.window,3)>triggers,"Horizontal generated shake triggers real application");
-            check(until([&]{return !query(child.window,1);},2000)&&arrowShape()==baseline,"Animation automatically restores configured cursor pixels and hotspot");
+            check(until([&]{return !query(child.window,1);},2000)&&systemShapes()==baselineSystem,"Animation automatically restores configured cursor pixels and hotspot");
             triggers=query(child.window,3);wave(950,true);check(query(child.window,3)>triggers,"Vertical generated shake triggers real application");
-            child.command(Pause);check(!query(child.window,1)&&arrowShape()==baseline,"Pause restores cursor immediately");
+            child.command(Pause);check(!query(child.window,1)&&systemShapes()==baselineSystem,"Pause restores cursor immediately");
             triggers=query(child.window,3);wave();check(query(child.window,3)==triggers,"Paused application ignores shakes");
             child.command(Resume);wave();check(query(child.window,3)>triggers,"Resume accepts fresh shake");
             child.command(Pause);child.command(Resume);
@@ -331,14 +412,16 @@ int wmain(int argc,wchar_t** argv) {
                 SetForegroundWindow(target);
                 check(until([&]{return query(child.window,0)==1;}),"Excluded foreground app temporarily suppresses effects");
                 check(query(child.window,6)==1,"Application exclusion preserves user's enabled setting");
-                triggers=query(child.window,3);wave(650);
+                triggers=query(child.window,3);auto excludedEvents=query(child.window,9);
+                measure(child,"excluded_app_motion",2);
+                check(query(child.window,9)==excludedEvents,"Excluded app withdraws Raw Input registration");
                 check(query(child.window,3)==triggers&&!query(child.window,1),"Excluded app receives motion without activation");
                 check(until([&]{SetForegroundWindow(peer.window);return GetForegroundWindow()==peer.window&&query(child.window,0)==0;}),"Allowed foreground app resumes detection");
                 delay(100);wave(120);
                 check(query(child.window,3)==triggers,"Leaving excluded app does not reuse old gesture evidence");
                 wave(750);check(query(child.window,3)>triggers,"Fresh shake activates in allowed app");
                 SetForegroundWindow(target);
-                check(until([&]{return query(child.window,0)==1&&!query(child.window,1);})&&arrowShape()==baseline,"Entering excluded app restores active system cursor");
+                check(until([&]{return query(child.window,0)==1&&!query(child.window,1);})&&systemShapes()==baselineSystem,"Entering excluded app restores active system cursor");
                 child.command(Pause);
                 check(until([&]{SetForegroundWindow(peer.window);return query(child.window,0)==0;}),"Foreground notifications work while manually paused");
                 wave(650);check(query(child.window,6)==0&&!query(child.window,1),"Application switch cannot undo manual pause");
@@ -355,8 +438,10 @@ int wmain(int argc,wchar_t** argv) {
             measure(child,"idle_after_settings",0);
             measure(child,"effect_held_static",1);delay(1500);
             measure(child,"continuous_shake",2);delay(1500);
+            hoverZones=true;measure(child,"continuous_hover_shake",2);hoverZones=false;setRole(IDC_ARROW);delay(1500);
             child.command(Pause);measure(child,"paused",0);child.command(Resume);
             delay(3500);
+            auto guardianBefore=resources(child.guard.get());
             DWORD gdiBefore=GetGuiResources(child.process.hProcess,GR_GDIOBJECTS),userBefore=GetGuiResources(child.process.hProcess,GR_USEROBJECTS),handlesBefore=0;
             GetProcessHandleCount(child.process.hProcess,&handlesBefore);
             for(int cycle=0;cycle<16;++cycle){
@@ -368,6 +453,9 @@ int wmain(int argc,wchar_t** argv) {
             DWORD handlesAfter=0;GetProcessHandleCount(child.process.hProcess,&handlesAfter);
             check(query(child.window,13)==0 && query(child.window,14)==0,"Inactive cursor cache releases all frames and accounted bytes");
             check(GetGuiResources(child.process.hProcess,GR_GDIOBJECTS)==gdiBefore && GetGuiResources(child.process.hProcess,GR_USEROBJECTS)==userBefore && handlesBefore==handlesAfter,"Repeated effects return GDI USER and kernel handles to baseline");
+            auto guardianAfter=resources(child.guard.get());
+            check(guardianBefore==guardianAfter,"Repeated effects return guardian GDI USER and kernel handles to baseline");
+            report<<"GUARDIAN_RESOURCES gdi_before="<<guardianBefore[0]<<" gdi_after="<<guardianAfter[0]<<" user_before="<<guardianBefore[1]<<" user_after="<<guardianAfter[1]<<" handles_before="<<guardianBefore[2]<<" handles_after="<<guardianAfter[2]<<'\n';
             report<<"RESOURCES gdi_before="<<gdiBefore<<" gdi_after="<<GetGuiResources(child.process.hProcess,GR_GDIOBJECTS)<<" user_before="<<userBefore<<" user_after="<<GetGuiResources(child.process.hProcess,GR_USEROBJECTS)<<" handles_before="<<handlesBefore<<" handles_after="<<handlesAfter<<'\n';
             moveTo(center());delay(100);
             auto burstEvents=query(child.window,9),burstSamples=query(child.window,5);
@@ -392,21 +480,21 @@ int wmain(int argc,wchar_t** argv) {
             SetForegroundWindow(target);moveTo(center());delay(200);
             child.preview();child.command(Quit);check(until([&]{return WaitForSingleObject(child.process.hProcess,0)==WAIT_OBJECT_0;}),"Normal exit terminates main process");
             check(until([&]{return WaitForSingleObject(child.guard.get(),0)==WAIT_OBJECT_0;}),"Normal exit terminates recovery process");
-            check(arrowShape()==baseline,"Normal exit restores original cursor");
+            check(systemShapes()==baselineSystem,"Normal exit restores original cursor");
         }
         {
             Child child(path,(directory/L"crash-profile").wstring());child.preview();TerminateProcess(child.process.hProcess,9);
-            check(until([&]{return WaitForSingleObject(child.guard.get(),0)==WAIT_OBJECT_0;})&&arrowShape()==baseline,"Recovery process restores cursor after forced main termination");
+            check(until([&]{return WaitForSingleObject(child.guard.get(),0)==WAIT_OBJECT_0;})&&systemShapes()==baselineSystem,"Recovery process restores cursor after forced main termination");
             int before=clicks;button(MOUSEEVENTF_LEFTDOWN);button(MOUSEEVENTF_LEFTUP);check(clicks==before+1,"Input remains usable after crash recovery");
         }
         {
             Child child(path,(directory/L"hang-profile").wstring());child.preview();PostMessageW(child.window,CommandMessage,TestHang,0);
             check(until([&]{return WaitForSingleObject(child.process.hProcess,0)==WAIT_OBJECT_0;},5000),"Recovery process terminates own hung parent");
-            check(until([&]{return WaitForSingleObject(child.guard.get(),0)==WAIT_OBJECT_0;})&&arrowShape()==baseline,"Hung animation recovery restores cursor");
+            check(until([&]{return WaitForSingleObject(child.guard.get(),0)==WAIT_OBJECT_0;})&&systemShapes()==baselineSystem,"Hung animation recovery restores cursor");
         }
         {
             Child child(path,(directory/L"guard-profile").wstring());child.preview();TerminateProcess(child.guard.get(),9);
-            check(until([&]{return !query(child.window,6);})&&!query(child.window,1)&&arrowShape()==baseline,"Guardian failure makes main process restore and pause");
+            check(until([&]{return !query(child.window,6);})&&!query(child.window,1)&&systemShapes()==baselineSystem,"Guardian failure makes main process restore and pause");
         }
         {
             auto recoveryDirectory=(directory/L"restart-profile").wstring();
@@ -419,7 +507,7 @@ int wmain(int argc,wchar_t** argv) {
                 WaitForSingleObject(child.process.hProcess,2000);WaitForSingleObject(child.guard.get(),2000);
                 check(std::filesystem::exists(std::filesystem::path(recoveryDirectory)/L"native-recovery.flag"),"Forced process-tree termination preserves recovery marker");
             }
-            {Child child(path,recoveryDirectory);check(arrowShape()==baseline&&!std::filesystem::exists(std::filesystem::path(recoveryDirectory)/L"native-recovery.flag"),"Next startup recovers stale system cursor state");}
+            {Child child(path,recoveryDirectory);check(systemShapes()==baselineSystem&&!std::filesystem::exists(std::filesystem::path(recoveryDirectory)/L"native-recovery.flag"),"Next startup recovers stale system cursor state");}
         }
         CURSORINFO finalCursor{};
         check(cursorInfo(finalCursor)&& (finalCursor.flags&CURSOR_SHOWING),"Cursor remains visible after all recovery scenarios");

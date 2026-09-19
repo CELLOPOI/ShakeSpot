@@ -407,13 +407,21 @@ impl App {
         let (height, orientation) = self.geometry(point, frame.scale);
         self.flip_x = orientation & 1 != 0;
         self.flip_y = orientation & 2 != 0;
-        if self.last_frame != Some((height, role, orientation)) {
+        if self
+            .last_frame
+            .map(|(height, _, orientation)| (height, orientation))
+            != Some((height, orientation))
+        {
             let source = self.frames.get(height, self.flip_x, self.flip_y)?;
             self.guardian.begin()?;
-            source.replace_system(role)?;
-            self.updates += 1;
-            self.last_frame = Some((height, role, orientation));
+            // 悬浮控件可在 Raw Input 处理后甚至鼠标静止时切换角色。
+            // 各标准角色预先使用同一帧，避免等下一次检查时闪回小光标。
+            for role in 0..CURSOR_IDS.len() {
+                source.replace_system(role)?;
+                self.updates += 1;
+            }
         }
+        self.last_frame = Some((height, role, orientation));
         self.schedule(now)
     }
     fn raw_input(&mut self, motion: RawMotion, pressed: bool, count: u32) -> Result<()> {
@@ -449,7 +457,12 @@ impl App {
                 if self.active && self.timer_delay > 15 {
                     let role = info.and_then(|info| self.roles.identify(info.hCursor));
                     let (height, orientation) = self.geometry(point, self.settings.maximum_scale);
-                    if role.map(|role| (height, role, orientation)) != self.last_frame {
+                    if role.is_none()
+                        || self
+                            .last_frame
+                            .map(|(height, _, orientation)| (height, orientation))
+                            != Some((height, orientation))
+                    {
                         self.tick()?;
                     }
                 }
