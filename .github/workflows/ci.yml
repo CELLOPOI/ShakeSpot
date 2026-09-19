@@ -41,7 +41,7 @@ jobs:
         with:
           name: ShakeSpot-windows-x64
           path: |
-            artifacts/ShakeSpot-*-rust-win-x64.zip
-            artifacts/ShakeSpot-*-rust-win-x64.zip.sha256
+            artifacts/ShakeSpot-*-win-x64.zip
+            artifacts/ShakeSpot-*-win-x64.zip.sha256
           if-no-files-found: error
           retention-days: 14

@@ -1,6 +1,6 @@
 # 发布到 GitHub
 
-目标仓库名建议为 `CELLOPOI/ShakeSpot`，默认分支为 `main`。下面的创建仓库和推送命令会公开源码，请在准备正式上传时执行。它们不由构建脚本或 CI 自动运行。
+仓库为 `CELLOPOI/ShakeSpot`，默认分支为 `main`。首次公开版本采用预发布形式供朋友试用。下面的创建仓库和推送命令会公开源码，请在准备正式上传时执行。它们不由构建脚本或 CI 自动运行。
 
 **发布内容**
 
@@ -8,8 +8,8 @@
 
 用户下载文件放在 GitHub Release：
 
-- `ShakeSpot-0.4.1-rust-win-x64.zip`：程序、使用说明、MIT 和依赖许可、构建信息。
-- `ShakeSpot-0.4.1-rust-win-x64.zip.sha256`：整个 ZIP 的 SHA-256。
+- `ShakeSpot-0.4.1-win-x64.zip`：程序、中文使用说明、MIT 和依赖许可、构建信息；开发说明和验证记录保留在仓库。
+- `ShakeSpot-0.4.1-win-x64.zip.sha256`：整个 ZIP 的 SHA-256。
 
 ZIP 内的 `SHA256SUMS.txt` 记录每个打包文件的 SHA-256；`BUILD-INFO.txt` 记录实际工具链和 EXE 哈希。发布包只从明确的文件清单生成。
 
@@ -28,12 +28,12 @@ ZIP 内的 `SHA256SUMS.txt` 记录每个打包文件的 SHA-256；`BUILD-INFO.tx
 在发布包所在目录核对 ZIP：
 
 ```powershell
-$zipName = 'ShakeSpot-0.4.1-rust-win-x64.zip'
+$zipName = 'ShakeSpot-0.4.1-win-x64.zip'
 $expected = ((Get-Content -LiteralPath "$zipName.sha256" -Raw).Trim() -split '\s+')[0]
 if ((Get-FileHash -LiteralPath $zipName -Algorithm SHA256).Hash -ne $expected) { throw 'ZIP checksum mismatch' }
 ```
 
-GitHub Actions 在 `windows-2022` 上执行格式、Clippy、逻辑测试、基准和打包，产物保留 14 天。云端基准只用于检查执行和分配约束，不能与本机耗时直接比较；桌面检查由维护者本机完成。工作流配置完成不等于已经通过远程运行。
+GitHub Actions 在 `windows-2022` 上执行格式、Clippy、逻辑测试、基准和打包，产物保留 14 天。云端基准只用于检查执行和分配约束，不能与本机耗时直接比较；桌面检查由维护者本机完成。每次发布应核对对应提交的 Actions 结果。
 
 **首次上传**
 
@@ -56,9 +56,15 @@ gh repo create CELLOPOI/ShakeSpot --public --source . --remote origin --push --d
 ```powershell
 git tag -a v0.4.1 -m "ShakeSpot 0.4.1"
 git push origin v0.4.1
-gh release create v0.4.1 artifacts/ShakeSpot-0.4.1-rust-win-x64.zip artifacts/ShakeSpot-0.4.1-rust-win-x64.zip.sha256 --repo CELLOPOI/ShakeSpot --verify-tag --draft --title "ShakeSpot 0.4.1" --notes-file docs/releases/v0.4.1.md
+gh release create v0.4.1 artifacts/ShakeSpot-0.4.1-win-x64.zip artifacts/ShakeSpot-0.4.1-win-x64.zip.sha256 --repo CELLOPOI/ShakeSpot --verify-tag --draft --prerelease --title "ShakeSpot 0.4.1 试用版" --notes-file docs/releases/v0.4.1.md
 ```
 
-这会先创建 Release 草稿。检查附件、说明和校验文件后，在 GitHub 的 Release 页面发布草稿。不要重新编译 EXE 后沿用旧哈希或未经核对的性能数据。
+这会先创建预发布草稿。检查附件、说明和校验文件后，在 GitHub 的 Release 页面发布草稿，或执行：
 
-后续升级需同步更新 `Cargo.toml` / `Cargo.lock`、`rust/resources.rc`、`rust/app.manifest`、README、更新记录和对应的 `docs/releases/v<版本>.md`。打包文件名从 Cargo 元数据读取。
+```powershell
+gh release edit v0.4.1 --repo CELLOPOI/ShakeSpot --draft=false --prerelease
+```
+
+发布后将 `https://github.com/CELLOPOI/ShakeSpot/releases/tag/v0.4.1` 发给朋友，让对方下载 ZIP 并解压运行。不要重新编译 EXE 后沿用旧哈希或未经核对的性能数据。
+
+后续升级需同步更新 `Cargo.toml` / `Cargo.lock`、`rust/resources.rc`、`rust/app.manifest`、README、更新记录、`packaging/使用说明.txt` 和对应的 `docs/releases/v<版本>.md`。打包文件名从 Cargo 元数据读取。

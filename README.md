@@ -6,7 +6,7 @@
 
 **下载与使用**
 
-从仓库的 [Releases 页面](https://github.com/CELLOPOI/ShakeSpot/releases) 下载 `ShakeSpot-0.4.1-rust-win-x64.zip`，解压到固定目录，双击 `ShakeSpot.exe`。GitHub 自动提供的 Source code 压缩包是源码，需要自行编译。首次发布完成后，Releases 页面才会提供程序下载。
+从仓库的 [Releases 页面](https://github.com/CELLOPOI/ShakeSpot/releases) 下载 `ShakeSpot-0.4.1-win-x64.zip`，解压到固定目录，双击 `ShakeSpot.exe`。GitHub 自动提供的 Source code 压缩包是源码，需要自行编译。当前作为预发布版提供给朋友试用，包内附有“使用说明.txt”。
 
 - 快速往返晃动即可触发；持续晃动会延长效果。
 - 默认灵敏度 3/5、最大倍率 4、持续时间 1.1 秒，开机启动默认关闭。
@@ -39,7 +39,7 @@
 ./scripts/rust.ps1 run
 ```
 
-打包执行 `./scripts/rust.ps1 publish`，输出到 `artifacts/publish/rust-win-x64/`，同时生成版本化 ZIP 和 `.zip.sha256` 校验文件。`publish` 只在本地生成文件。
+打包执行 `./scripts/rust.ps1 publish`，输出到 `artifacts/publish/rust-win-x64/`，同时生成版本化 ZIP 和 `.zip.sha256` 校验文件。下载包包含程序、中文使用说明、许可证及校验信息；开发文档和性能记录保留在仓库中。`publish` 只在本地生成文件。
 
 `./scripts/rust.ps1 bench` 测量检测、输入和栅格化热路径。`./scripts/rust.ps1 desktop-checks` 会移动鼠标、操作自建窗口并模拟测试进程异常退出，请先退出常用实例并停止手动输入；它使用独立配置，结束后恢复现场。发布后的启动检查为 `./scripts/smoke-rust.ps1`。
 

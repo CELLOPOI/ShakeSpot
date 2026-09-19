@@ -71,7 +71,9 @@ try {
         $packageFiles = [Collections.Generic.List[string]]::new()
         Copy-Item -LiteralPath $exe -Destination (Join-Path $publishRoot 'ShakeSpot.exe') -Force
         $packageFiles.Add('ShakeSpot.exe')
-        $documents = @('LICENSE','README.md','CHANGELOG.md','CONTRIBUTING.md','AGENTS.md','PUBLISHING.md','RUST.md','RUST-VALIDATION.md','THIRD_PARTY_NOTICES.md','NATIVE.md','NATIVE-README.md','NATIVE-VALIDATION.md','LEGACY.md','VALIDATION.md',"docs/releases/v$version.md")
+        Copy-Item -LiteralPath (Join-Path $projectRoot 'packaging/使用说明.txt') -Destination (Join-Path $publishRoot '使用说明.txt') -Force
+        $packageFiles.Add('使用说明.txt')
+        $documents = @('LICENSE','THIRD_PARTY_NOTICES.md')
         $licenses = @('windows-rs-MIT.txt','windows-rs-APACHE-2.0.txt','windows-link-MIT.txt','windows-link-APACHE-2.0.txt','Rust-1.93.1-COPYRIGHT-library.html','Microsoft-STL-LICENSE.txt')
         foreach ($relativePath in ($documents + @($licenses | ForEach-Object { "licenses/$_" }))) {
             $destination = Join-Path $publishRoot $relativePath
@@ -98,7 +100,7 @@ try {
         $packageFiles.Add('SHA256SUMS.txt')
 
         # 明确列出发布文件，避免旧输出目录中的配置或测试文件混入 ZIP。
-        $archivePath = Join-Path $projectRoot "artifacts/ShakeSpot-$version-rust-win-x64.zip"
+        $archivePath = Join-Path $projectRoot "artifacts/ShakeSpot-$version-win-x64.zip"
         $archiveStream = [IO.File]::Open($archivePath, [IO.FileMode]::Create)
         try {
             $archive = [IO.Compression.ZipArchive]::new($archiveStream, [IO.Compression.ZipArchiveMode]::Create, $true)

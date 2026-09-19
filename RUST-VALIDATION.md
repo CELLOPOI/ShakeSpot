@@ -75,6 +75,6 @@
 
 最终 EXE 为 425,472 字节（415.5 KiB），SHA-256：`F8E5B57C2A8CEA55DFADA2EC3AF2D04FA32CDDEBFDFAB038CB76FF5C8F97ACB0`。桌面回归、发布启动检查与本机发布文件的哈希一致。此哈希对应上述工具链构建的 EXE；其他机器或工具链的产物以各自的 BUILD-INFO.txt 和 SHA256SUMS.txt 为准。
 
-程序为 `artifacts/publish/rust-win-x64/ShakeSpot.exe`，压缩包为 `artifacts/ShakeSpot-0.4.1-rust-win-x64.zip`；启动检查记录为 `artifacts/rust/published-smoke.json`。版本未引入新的运行时依赖。
+程序为 `artifacts/publish/rust-win-x64/ShakeSpot.exe`，压缩包为 `artifacts/ShakeSpot-0.4.1-win-x64.zip`；启动检查记录为 `artifacts/rust/published-smoke.json`。版本未引入新的运行时依赖。
 
 物理高回报率鼠标、不同硬件 DPI 手感、长期运行、混合 DPI 多屏、远程桌面、锁屏/睡眠与真实重新登录启动仍需对应环境验收。合成输入与短时资源检查不能替代这些验证。整个进程树同时结束后，仍需下次启动或显式 `--restore` 恢复指针。
