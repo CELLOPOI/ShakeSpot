@@ -1,6 +1,8 @@
 # Rust 版本验证记录
 
-最新的 0.4.2 悬浮切换修复见 [独立验证记录](validation/HOVER-FIX-0.4.2.md)。下文保留 0.4.1 发布数据，供历史对照。
+最新的 0.4.3 分栏私有光标修复见 [独立验证记录](validation/SPLITTER-FIX-0.4.3.md)。
+
+0.4.2 悬浮切换修复见 [独立验证记录](validation/HOVER-FIX-0.4.2.md)。下文保留 0.4.1 发布数据，供历史对照。
 
 日期：2026-09-19。Windows 11 x64，10.0.26100，12 个逻辑处理器；一块 3840 × 2160 显示器，175% 缩放（168 DPI）。Rust/Cargo 1.93.1，MSVC 14.44、Windows SDK 10.0.26100.0。版本 0.4.1，Release、ThinLTO、静态 CRT、PerMonitorV2。
 

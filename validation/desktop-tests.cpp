@@ -13,6 +13,7 @@ bool hidden = false, custom = false;
 HCURSOR customCursor = nullptr;
 LPCWSTR standardCursor = IDC_ARROW;
 bool hoverZones = false;
+bool splitterZones = false;
 std::ofstream report;
 int passed = 0;
 void check(bool value, const char* name) {
@@ -41,7 +42,13 @@ LRESULT CALLBACK targetProc(HWND window, UINT message, WPARAM w, LPARAM l) {
             const LPCWSTR zones[]={IDC_ARROW,IDC_HAND,IDC_IBEAM};
             role=zones[std::abs(point.x/60)%3];
         }
-        SetCursor(hidden ? nullptr : custom ? customCursor : LoadCursorW(nullptr,role));return TRUE;
+        bool onSplitter=false;
+        if(splitterZones) {
+            POINT point{};GetCursorPos(&point);ScreenToClient(window,&point);
+            RECT rect{};GetClientRect(window,&rect);
+            onSplitter=std::abs(point.x-rect.right/2)<40;
+        }
+        SetCursor(hidden ? nullptr : (custom||onSplitter) ? customCursor : LoadCursorW(nullptr,role));return TRUE;
     }
     case WM_PAINT: {
         PAINTSTRUCT ps{}; HDC dc = BeginPaint(window, &ps); RECT rect{}; GetClientRect(window,&rect);
@@ -195,7 +202,7 @@ std::pair<double,double> memory(HANDLE process) {PROCESS_MEMORY_COUNTERS_EX coun
 void measure(Child& child,const char* name,int mode) {
     double begin=clockMs(),startMain=cpu(child.process.hProcess),startGuard=cpu(child.guard.get()),nextPreview=0,maxWorking=0,maxPrivate=0;
     double mainWorking=0,mainPrivate=0,guardWorking=0,guardPrivate=0;
-    auto startEvents=query(child.window,9),startSamples=query(child.window,5),startUpdates=query(child.window,2),startTicks=query(child.window,8);
+    auto startEvents=query(child.window,9),startSamples=query(child.window,5),startUpdates=query(child.window,2),startTicks=query(child.window,8),startTriggers=query(child.window,3);
     POINT origin=center();
     while(clockMs()-begin<10000) {
         double t=clockMs()-begin;
@@ -210,12 +217,64 @@ void measure(Child& child,const char* name,int mode) {
     double elapsed=(clockMs()-begin)/1000,mainCpu=cpu(child.process.hProcess)-startMain,guardCpu=cpu(child.guard.get())-startGuard,total=mainCpu+guardCpu;
     report<<std::fixed<<std::setprecision(3)<<"PERF "<<name<<" wall_s="<<elapsed<<" cpu_s="<<total<<" one_core_percent="<<100*total/elapsed<<" combined_working_MiB="<<maxWorking<<" combined_private_MiB="<<maxPrivate
         <<" main_cpu_s="<<mainCpu<<" guardian_cpu_s="<<guardCpu<<" main_working_MiB="<<mainWorking<<" main_private_MiB="<<mainPrivate<<" guardian_working_MiB="<<guardWorking<<" guardian_private_MiB="<<guardPrivate
-        <<" raw_events="<<query(child.window,9)-startEvents<<" samples="<<query(child.window,5)-startSamples<<" cursor_updates="<<query(child.window,2)-startUpdates<<" animation_ticks="<<query(child.window,8)-startTicks<<'\n';report.flush();
+        <<" raw_events="<<query(child.window,9)-startEvents<<" samples="<<query(child.window,5)-startSamples<<" cursor_updates="<<query(child.window,2)-startUpdates<<" triggers="<<query(child.window,3)-startTriggers<<" animation_ticks="<<query(child.window,8)-startTicks<<'\n';report.flush();
     std::cout<<"MEASURED "<<name<<std::endl;
 }
 void setRole(LPCWSTR role) {
     standardCursor=role;
     SendMessageW(target,WM_SETCURSOR,reinterpret_cast<WPARAM>(target),MAKELPARAM(HTCLIENT,WM_MOUSEMOVE));
+}
+void makePrivateResize() {
+    customCursor=static_cast<HCURSOR>(CopyImage(LoadCursorW(nullptr,IDC_SIZEWE),IMAGE_CURSOR,0,0,0));
+    if(!customCursor||customCursor==LoadCursorW(nullptr,IDC_SIZEWE))throw std::runtime_error("Private resize cursor creation failed.");
+}
+void clearPrivateResize() {
+    custom=false;splitterZones=false;setRole(IDC_ARROW);
+    DestroyCursor(customCursor);customCursor=nullptr;
+}
+void splitterMeasure(Child& child) {
+    makePrivateResize();splitterZones=true;
+    measure(child,"continuous_splitter_shake",2);
+    clearPrivateResize();delay(1500);
+}
+void splitterChecks(Child& child) {
+    const auto originals=systemShapes();
+    makePrivateResize();const auto privateShape=shape(customCursor);
+    custom=true;setRole(IDC_ARROW);delay(40);
+    auto triggers=query(child.window,3);wave(800);
+    check(query(child.window,3)>triggers&&query(child.window,1),"A shake recognized over a private splitter cursor retains its effect");
+    CURSORINFO info{};
+    check(cursorInfo(info)&&info.hCursor==customCursor&&shape(customCursor)==privateShape,"Private splitter pixels, hotspot and ownership remain unchanged");
+    auto events=query(child.window,9);
+    double begin=clockMs();custom=false;setRole(IDC_ARROW);
+    bool enlarged=until([&]{return cursorInfo(info)&&shape(info.hCursor)==arrowShape()&&arrowShape().height>originals[0].height;},60);
+    report<<"SPLITTER return_latency_ms="<<clockMs()-begin<<'\n';
+    check(enlarged&&query(child.window,9)==events,"Leaving a splitter reveals the retained enlarged frame without another input");
+    custom=true;setRole(IDC_ARROW);delay(150);
+    check(query(child.window,1)&&shape(customCursor)==privateShape,"Crossing a private splitter keeps the active animation and private cursor");
+    custom=false;setRole(IDC_ARROW);
+    check(until([&]{return !query(child.window,1);},2000)&&systemShapes()==originals,"Retained effect expires and restores all standard roles");
+
+    child.command(Pause);child.command(Resume);splitterZones=true;
+    triggers=query(child.window,3);bool observed=false,gap=false;begin=clockMs();POINT origin=center();
+    do {
+        POINT point=origin;point.x+=static_cast<LONG>(150*std::sin((clockMs()-begin)/48));moveTo(point);delay(10);
+        bool active=query(child.window,1)!=0;gap=gap||(observed&&!active);observed=observed||active;
+    } while(clockMs()-begin<1800);
+    report<<"SPLITTER cross_triggers="<<query(child.window,3)-triggers<<" effect_gap="<<gap<<'\n';
+    check(query(child.window,3)>triggers&&observed&&!gap,"Repeated shakes across a private splitter trigger and stay active");
+    splitterZones=false;custom=true;setRole(IDC_ARROW);
+    button(MOUSEEVENTF_LEFTDOWN);check(!query(child.window,1)&&systemShapes()==originals,"Clicking a private splitter immediately restores all roles");
+    triggers=query(child.window,3);wave(500);
+    check(query(child.window,3)==triggers,"Dragging a private splitter cannot trigger a retained effect");button(MOUSEEVENTF_LEFTUP);
+
+    child.command(Preview);delay(180);hidden=true;setRole(IDC_ARROW);
+    check(until([&]{return !query(child.window,1);},200)&&systemShapes()==originals,"Hiding a private cursor cancels the retained effect");
+    hidden=false;setRole(IDC_ARROW);child.command(Preview);delay(180);
+    check(until([&]{return !query(child.window,1);},2000)&&systemShapes()==originals,"An effect started on a private cursor expires even without leaving it");
+    custom=false;setRole(IDC_ARROW);delay(150);
+    check(!query(child.window,1)&&arrowShape()==originals[0],"Returning after expiry does not replay a stale effect");
+    clearPrivateResize();child.command(Pause);child.command(Resume);delay(3500);
 }
 void hoverChecks(Child& child,const Shape& baseline) {
     std::array<Shape,CursorIds.size()> originals{};
@@ -250,10 +309,10 @@ void hoverChecks(Child& child,const Shape& baseline) {
     check(restored,"All visited hover roles restore their original pixels and hotspots");
     child.command(Resume);child.preview();
     customCursor=makeArrow(40);custom=true;setRole(IDC_ARROW);
-    check(until([&]{return !query(child.window,1);},200),"Entering a custom hover cursor cancels the effect safely");
+    delay(150);check(query(child.window,1)!=0,"Entering a custom hover cursor preserves the effect timeline");
     CURSORINFO info{};check(cursorInfo(info)&&info.hCursor==customCursor,"Custom hover cursor remains owned by its application");
     custom=false;setRole(IDC_ARROW);DestroyCursor(customCursor);customCursor=nullptr;
-    check(arrowShape()==baseline,"Custom hover cancellation restores the system arrow");
+    check(arrowShape().height>baseline.height,"Leaving a custom hover cursor resumes the enlarged system arrow");
     child.preview();
     hidden=true;setRole(IDC_ARROW);
     check(until([&]{return !query(child.window,1);},200),"A hidden hover cursor cancels the active effect");
@@ -291,8 +350,9 @@ int wmain(int argc,wchar_t** argv) {
         if(FindWindowW(WindowClass,nullptr))throw std::runtime_error("Close the existing native application before running desktop tests.");
         bool measureOnly=argc>2&&std::wstring(argv[2])==L"--measure-only";
         bool hoverOnly=argc>2&&std::wstring(argv[2])==L"--hover-only";
+        bool splitterOnly=argc>2&&std::wstring(argv[2])==L"--splitter-only";
         auto root=std::filesystem::path(executablePath()).parent_path();
-        auto directory=root/(measureOnly?L"performance-checks":hoverOnly?L"hover-checks":L"desktop-checks");
+        auto directory=root/(measureOnly?L"performance-checks":hoverOnly?L"hover-checks":splitterOnly?L"splitter-checks":L"desktop-checks");
         std::filesystem::create_directories(directory);report.open(directory/L"report.txt");
         std::wstring path=argc>1?argv[1]:(root/L"ShakeSpot.Native.exe").wstring();
         WNDCLASSW type{};type.hInstance=GetModuleHandleW(nullptr);type.lpszClassName=L"ShakeSpot.Native.TestTarget";type.lpfnWndProc=targetProc;type.hCursor=LoadCursorW(nullptr,IDC_ARROW);RegisterClassW(&type);
@@ -306,6 +366,12 @@ int wmain(int argc,wchar_t** argv) {
         auto baselineSystem=systemShapes();
         Shape baseline=baselineSystem[0];report<<"BASELINE height="<<baseline.height<<" width="<<baseline.width<<" dpi="<<GetDpiForWindow(target)<<'\n';
         cleanup.changed=true;
+        if(splitterOnly) {
+            Child child(path,(directory/L"profile").wstring());
+            splitterChecks(child);
+            report<<"TOTAL "<<passed<<" checks passed\n";
+            return 0;
+        }
         if(hoverOnly) {
             Child child(path,(directory/L"profile").wstring());
             hoverChecks(child,baseline);
@@ -319,6 +385,7 @@ int wmain(int argc,wchar_t** argv) {
             measure(child,"effect_held_static",1);delay(1500);
             measure(child,"continuous_shake",2);delay(1500);
             hoverZones=true;measure(child,"continuous_hover_shake",2);hoverZones=false;setRole(IDC_ARROW);delay(1500);
+            splitterMeasure(child);
             child.command(Pause);measure(child,"paused",0);
             check(!query(child.window,1)&&systemShapes()==baselineSystem,"Performance run restores cursor");
             return 0;
@@ -330,6 +397,7 @@ int wmain(int argc,wchar_t** argv) {
             check(query(child.window,5)==sampleStart,"Idle detection has no position polling");
             measure(child,"idle_before_settings",0);
             hoverChecks(child,baseline);
+            splitterChecks(child);
             child.preview();
             CURSORINFO current{};
             check(cursorInfo(current),"Current visible cursor can be queried");
@@ -362,8 +430,10 @@ int wmain(int argc,wchar_t** argv) {
             child.command(Preview);check(!query(child.window,1),"Application-hidden cursor suppresses effect");
             hidden=false;moveTo({center().x+1,center().y});delay(50);
             customCursor=makeArrow(40);custom=true;moveTo(center());delay(50);
-            child.command(Preview);check(!query(child.window,1),"Custom application cursor is left unchanged");
+            child.command(Preview);CURSORINFO privateInfo{};
+            check(cursorInfo(privateInfo)&&privateInfo.hCursor==customCursor,"Custom application cursor is left unchanged");
             custom=false;moveTo({center().x+1,center().y});delay(50);
+            DestroyCursor(customCursor);customCursor=nullptr;
             RECT originalBounds{};GetWindowRect(target,&originalBounds);
             LONG_PTR originalStyle=GetWindowLongPtrW(target,GWL_STYLE);
             SetWindowLongPtrW(target,GWL_STYLE,WS_POPUP);
@@ -439,17 +509,20 @@ int wmain(int argc,wchar_t** argv) {
             measure(child,"effect_held_static",1);delay(1500);
             measure(child,"continuous_shake",2);delay(1500);
             hoverZones=true;measure(child,"continuous_hover_shake",2);hoverZones=false;setRole(IDC_ARROW);delay(1500);
+            splitterMeasure(child);
             child.command(Pause);measure(child,"paused",0);child.command(Resume);
             delay(3500);
             auto guardianBefore=resources(child.guard.get());
             DWORD gdiBefore=GetGuiResources(child.process.hProcess,GR_GDIOBJECTS),userBefore=GetGuiResources(child.process.hProcess,GR_USEROBJECTS),handlesBefore=0;
             GetProcessHandleCount(child.process.hProcess,&handlesBefore);
+            makePrivateResize();
             for(int cycle=0;cycle<16;++cycle){
+                custom=cycle%2==0;setRole(IDC_ARROW);
                 child.command(Preview);delay(170);
                 check(query(child.window,13)<=16 && query(child.window,14)<=2*1024*1024,"Cursor cache remains within entry and byte budgets");
                 child.command(Pause);child.command(Resume);
             }
-            delay(3500);
+            clearPrivateResize();delay(3500);
             DWORD handlesAfter=0;GetProcessHandleCount(child.process.hProcess,&handlesAfter);
             check(query(child.window,13)==0 && query(child.window,14)==0,"Inactive cursor cache releases all frames and accounted bytes");
             check(GetGuiResources(child.process.hProcess,GR_GDIOBJECTS)==gdiBefore && GetGuiResources(child.process.hProcess,GR_USEROBJECTS)==userBefore && handlesBefore==handlesAfter,"Repeated effects return GDI USER and kernel handles to baseline");

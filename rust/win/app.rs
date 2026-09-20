@@ -52,7 +52,7 @@ pub struct App {
     buttons_held: bool,
     flip_x: bool,
     flip_y: bool,
-    last_frame: Option<(i32, usize, u32)>,
+    last_frame: Option<(i32, Option<usize>, u32)>,
     timer_delay: u32,
     stop_reason: isize,
     events: isize,
@@ -124,7 +124,10 @@ impl App {
         value[9] = self.events;
         value[10] = self.dialog as isize;
         value[11] = self.stop_reason;
-        value[12] = self.last_frame.map_or(-1, |(_, role, _)| role as isize);
+        value[12] = self
+            .last_frame
+            .and_then(|(_, role, _)| role)
+            .map_or(-1, |role| role as isize);
         value[13] = self.frames.len() as isize;
         value[14] = self.frames.bytes() as isize;
         value[15] = self.timer_delay as isize;
@@ -346,11 +349,7 @@ impl App {
         {
             return Ok(());
         }
-        let Some(info) = visible_cursor() else {
-            self.skipped += 1;
-            return Ok(());
-        };
-        if self.roles.identify(info.hCursor).is_none() {
+        if visible_cursor().is_none() {
             self.skipped += 1;
             return Ok(());
         }
@@ -389,15 +388,11 @@ impl App {
             self.stop_reason = 2;
             return self.cancel();
         }
-        let Some(role) = self
+        // 分栏等控件可能使用应用私有光标。保留手势和动画时间线，
+        // 只更新标准系统角色，离开控件时可直接显示已安装的放大帧。
+        let role = self
             .roles
-            .identify(info.ok_or("Cursor unavailable.")?.hCursor)
-        else {
-            self.stop_reason = 3;
-            self.skipped += 1;
-            self.detector.reset();
-            return self.cancel();
-        };
+            .identify(info.ok_or("Cursor unavailable.")?.hCursor);
         let mut point = POINT::default();
         // SAFETY: 输出结构体有效，读屏幕物理坐标不修改用户输入。
         if unsafe { GetPhysicalCursorPos(&mut point) } == 0 {
@@ -455,13 +450,11 @@ impl App {
             if self.input_visible {
                 self.point_dpi(point)?;
                 if self.active && self.timer_delay > 15 {
-                    let role = info.and_then(|info| self.roles.identify(info.hCursor));
                     let (height, orientation) = self.geometry(point, self.settings.maximum_scale);
-                    if role.is_none()
-                        || self
-                            .last_frame
-                            .map(|(height, _, orientation)| (height, orientation))
-                            != Some((height, orientation))
+                    if self
+                        .last_frame
+                        .map(|(height, _, orientation)| (height, orientation))
+                        != Some((height, orientation))
                     {
                         self.tick()?;
                     }
